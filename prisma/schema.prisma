@@ -1,0 +1,251 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Product {
+  id                String          @id @default(uuid())
+  name              String
+  sku               String          @unique
+  category          String          // e.g., "Seed", "Clothing", "Sticker"
+  variant           String?         // e.g., "White", "Large", "Glossy"
+  quantity          Int
+  costPrice         Float
+  salePrice         Float
+  expiryDate        DateTime?
+  supplier          String
+  lotNumber         String?
+  harvestDate       DateTime?
+  imageUrl          String?
+  lowStockThreshold Int             @default(10)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  inventoryLogs     InventoryLog[]
+  orderItems        OrderItem[]
+}
+
+model Customer {
+  id            String          @id @default(uuid())
+  name          String
+  email         String          @unique
+  phone         String?
+  segment       CustomerSegment @default(new)
+  totalOrders   Int             @default(0)
+  totalSpent    Float           @default(0)
+  lastOrderDate DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  orders        Order[]
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  orderNumber     String      @unique
+  customerId      String
+  customerName    String
+  customerEmail   String
+  subtotal        Float
+  tax             Float
+  total           Float
+  status          OrderStatus @default(pending)
+  channel         SaleChannel @default(online)
+  shippingAddress String?
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  customer        Customer    @relation(fields: [customerId], references: [id])
+  items           OrderItem[]
+}
+
+model OrderItem {
+  id          String  @id @default(uuid())
+  orderId     String
+  productId   String
+  productName String
+  quantity    Int
+  unitPrice   Float
+  total       Float
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model InventoryLog {
+  id             String          @id @default(uuid())
+  productId      String
+  productName    String
+  action         InventoryAction
+  quantityChange Int
+  previousQty    Int
+  newQty         Int
+  createdBy      String
+  createdAt      DateTime        @default(now())
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Campaign {
+  id            String         @id @default(uuid())
+  name          String
+  subject       String
+  content       String
+  targetSegment String
+  status        CampaignStatus @default(draft)
+  scheduledAt   DateTime?
+  sentAt        DateTime?
+  openRate      Float?
+  clickRate     Float?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model AIInsight {
+  id          String       @id @default(uuid())
+  type        InsightType
+  title       String
+  description String
+  action      String?
+  urgency     UrgencyLevel @default(low)
+  createdAt   DateTime     @default(now())
+}
+
+enum OrderStatus {
+  pending
+  processing
+  shipped
+  delivered
+  cancelled
+}
+
+enum SaleChannel {
+  online
+  market
+  wholesale
+}
+
+enum CustomerSegment {
+  new
+  repeat
+  vip
+  churned
+}
+
+enum InventoryAction {
+  restock
+  sale
+  adjustment
+  expired
+}
+
+enum CampaignStatus {
+  draft
+  scheduled
+  sent
+  active
+}
+
+model BusinessInfo {
+  id          String   @id @default("singleton")
+  name        String
+  industry    String   // e.g., "Clothing", "Sticker Store", "Seeds"
+  description String?
+  website     String?
+  currency    String   @default("USD")
+  updatedAt   DateTime @updatedAt
+}
+
+enum InsightType {
+  restock
+  pricing
+  trend
+  upsell
+  churn
+}
+
+enum UrgencyLevel {
+  low
+  medium
+  high
+}
+
+// ============================================================
+// SEO MARKETING MODELS
+// ============================================================
+
+model SeoProject {
+  id           String          @id @default(uuid())
+  name         String
+  businessType String
+  location     String?
+  website      String?
+  seedKeywords String[]        @default([])
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  keywords     SeoKeyword[]
+  competitors  SeoCompetitor[]
+  actions      SeoAction[]
+}
+
+model SeoKeyword {
+  id              String       @id @default(uuid())
+  projectId       String
+  keyword         String
+  searchVolume    Int          @default(0)
+  difficulty      Int          @default(0)   // 0-100
+  intent          SeoIntent    @default(informational)
+  opportunityScore Int         @default(0)   // 0-100
+  currentRank     Int?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  project         SeoProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rankings        SeoRanking[]
+}
+
+model SeoRanking {
+  id        String     @id @default(uuid())
+  keywordId String
+  position  Int
+  url       String?
+  recordedAt DateTime  @default(now())
+  keyword   SeoKeyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+}
+
+model SeoCompetitor {
+  id               String     @id @default(uuid())
+  projectId        String
+  domain           String
+  estimatedTraffic Int        @default(0)
+  domainAuthority  Int        @default(0)
+  topKeywords      String[]   @default([])
+  strategy         String?
+  weaknesses       String[]   @default([])
+  createdAt        DateTime   @default(now())
+  project          SeoProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model SeoAction {
+  id             String      @id @default(uuid())
+  projectId      String
+  action         String
+  description    String?
+  priority       SeoPriority @default(medium)
+  expectedImpact String?
+  trafficGain    Int         @default(0)
+  completed      Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+  project        SeoProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+enum SeoIntent {
+  informational
+  navigational
+  commercial
+  transactional
+}
+
+enum SeoPriority {
+  high
+  medium
+  low
+}
