@@ -3,10 +3,13 @@
 import { prisma } from '@/lib/prisma';
 import { revalidateTag } from 'next/cache';
 import type { Customer, CustomerSegment } from '@prisma/client';
+import { requireWorkspaceAccess } from '@/lib/server/require-workspace';
 
-export async function getCustomers() {
+export async function getCustomers(workspaceId: string) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     return await prisma.customer.findMany({
+      where: { workspaceId },
       orderBy: { totalSpent: 'desc' },
     });
   } catch (error) {
@@ -15,15 +18,16 @@ export async function getCustomers() {
   }
 }
 
-export async function runSegmentation() {
+export async function runSegmentation(workspaceId: string) {
   try {
-    const customers = await prisma.customer.findMany();
+    await requireWorkspaceAccess(workspaceId);
+    const customers = await prisma.customer.findMany({ where: { workspaceId } });
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     for (const c of customers) {
       let segment: CustomerSegment = 'new';
-      
+
       if (c.totalSpent > 1000 || c.totalOrders > 10) {
         segment = 'vip';
       } else if (c.totalOrders > 1) {
@@ -41,7 +45,7 @@ export async function runSegmentation() {
         });
       }
     }
-    
+
     revalidateTag('customers', '');
     return { success: true };
   } catch (error) {
@@ -50,30 +54,38 @@ export async function runSegmentation() {
   }
 }
 
-export async function updateCustomerSegment(id: string, segment: CustomerSegment) {
-  try {
-    const updated = await prisma.customer.update({
-      where: { id },
-      data: { segment },
-    });
-    revalidateTag('customers', '');
-    return updated;
-  } catch (error) {
-    console.error('Failed to update customer segment:', error);
-    throw error;
-  }
+export async function updateCustomerSegment(
+  workspaceId: string,
+  id: string,
+  segment: CustomerSegment
+) {
+  await requireWorkspaceAccess(workspaceId);
+  const row = await prisma.customer.findFirst({ where: { id, workspaceId } });
+  if (!row) throw new Error('Customer not found');
+  const updated = await prisma.customer.update({
+    where: { id },
+    data: { segment },
+  });
+  revalidateTag('customers', '');
+  return updated;
 }
 
-export async function getCustomerStats() {
+export async function getCustomerStats(workspaceId: string) {
   try {
-    const customers = await prisma.customer.findMany() as Customer[];
+    await requireWorkspaceAccess(workspaceId);
+    const customers = (await prisma.customer.findMany({
+      where: { workspaceId },
+    })) as Customer[];
     const totalRevenue = customers.reduce((sum: number, c: Customer) => sum + c.totalSpent, 0);
     const avgSpent = customers.length > 0 ? totalRevenue / customers.length : 0;
-    
-    const segmentCounts = customers.reduce((acc: Record<string, number>, c: Customer) => {
-      acc[c.segment] = (acc[c.segment] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+
+    const segmentCounts = customers.reduce(
+      (acc: Record<string, number>, c: Customer) => {
+        acc[c.segment] = (acc[c.segment] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
 
     return {
       total: customers.length,
@@ -86,8 +98,11 @@ export async function getCustomerStats() {
   }
 }
 
-export async function updateCustomer(id: string, data: Partial<Customer>) {
+export async function updateCustomer(workspaceId: string, id: string, data: Partial<Customer>) {
   try {
+    await requireWorkspaceAccess(workspaceId);
+    const row = await prisma.customer.findFirst({ where: { id, workspaceId } });
+    if (!row) return { success: false, error: 'Not found' };
     const updated = await prisma.customer.update({
       where: { id },
       data,
@@ -100,22 +115,23 @@ export async function updateCustomer(id: string, data: Partial<Customer>) {
   }
 }
 
-export async function deleteCustomer(id: string) {
+export async function deleteCustomer(workspaceId: string, id: string) {
   try {
+    await requireWorkspaceAccess(workspaceId);
+    const row = await prisma.customer.findFirst({ where: { id, workspaceId } });
+    if (!row) return { success: false, error: 'Not found' };
     await prisma.$transaction(async (tx) => {
-      // 1. Delete all related orders first (cascading manually)
       await tx.order.deleteMany({
-        where: { customerId: id },
+        where: { customerId: id, workspaceId },
       });
-      
-      // 2. Delete the customer
+
       await tx.customer.delete({
-        where: { id: id },
+        where: { id },
       });
     });
 
     revalidateTag('customers', '');
-    revalidateTag('orders', ''); // Also revalidate orders
+    revalidateTag('orders', '');
     return { success: true };
   } catch (error) {
     console.error('Failed to delete customer:', error);

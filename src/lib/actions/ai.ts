@@ -2,23 +2,38 @@
 
 import { prisma } from '@/lib/prisma';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { requireWorkspaceAccess } from '@/lib/server/require-workspace';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-async function getCompanyContext() {
+async function getCompanyContext(workspaceId: string) {
   const [products, orders, customers, businessInfo] = await Promise.all([
-    prisma.product.findMany({ select: { name: true, quantity: true, salePrice: true, variant: true, category: true }, take: 20 }),
-    prisma.order.findMany({ take: 10, orderBy: { createdAt: 'desc' }, select: { total: true, createdAt: true, customerName: true } }),
-    prisma.customer.findMany({ select: { segment: true, totalSpent: true }, take: 20 }),
-    prisma.businessInfo.findUnique({ where: { id: 'singleton' } }),
+    prisma.product.findMany({
+      where: { workspaceId },
+      select: { name: true, quantity: true, salePrice: true, variant: true, category: true },
+      take: 20,
+    }),
+    prisma.order.findMany({
+      where: { workspaceId },
+      take: 10,
+      orderBy: { createdAt: 'desc' },
+      select: { total: true, createdAt: true, customerName: true },
+    }),
+    prisma.customer.findMany({
+      where: { workspaceId },
+      select: { segment: true, totalSpent: true },
+      take: 20,
+    }),
+    prisma.businessInfo.findUnique({ where: { workspaceId } }),
   ]);
 
   return { products, orders, customers, businessInfo };
 }
 
-export async function getAIInsights() {
+export async function getAIInsights(workspaceId: string) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey || apiKey === 'your_gemini_api_key_here') {
       console.warn('Gemini API key missing or placeholder. Returning mock data.');
@@ -27,15 +42,16 @@ export async function getAIInsights() {
           id: 'mock-1',
           type: 'restock',
           title: 'Immediate Restock Needed (Mock)',
-          description: 'Organic White Chia seeds are dropping 22% faster than last month. 3 major orders in queue.',
+          description:
+            'Organic White Chia seeds are dropping 22% faster than last month. 3 major orders in queue.',
           action: 'Bulk Order Now',
           urgency: 'high',
           createdAt: new Date().toISOString(),
-        }
+        },
       ];
     }
 
-    const context = await getCompanyContext();
+    const context = await getCompanyContext(workspaceId);
     const prompt = `You are an expert SMB consultant for "Arbitury," a seeds and wellness business.
 Analyze the Context provided and return a JSON OBJECT with an "insights" key containing an array of 2-3 specific business "insights." 
 Each insight must have: 
@@ -54,7 +70,7 @@ Context (JSON): ${JSON.stringify(context)}`;
 
     const response = await result.response;
     const content = response.text() || '{"insights": []}';
-    
+
     let data;
     try {
       const jsonStr = content.replace(/```json|```/g, '').trim();
@@ -64,47 +80,46 @@ Context (JSON): ${JSON.stringify(context)}`;
       return [];
     }
 
-    const insights = Array.isArray(data) ? data : (data.insights || data.insight || []);
-    return insights.map((ins: any, i: number) => ({
+    const insights = Array.isArray(data) ? data : data.insights || data.insight || [];
+    return insights.map((ins: Record<string, unknown>, i: number) => ({
       id: `ai-${Date.now()}-${i}`,
       ...ins,
       createdAt: new Date().toISOString(),
     }));
-  } catch (error: any) {
-    console.error('getAIInsights overall error:', error.message || error);
-    if (error.status === 404 || error.status === 400) {
-       console.error('API Error details:', error);
-    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('getAIInsights overall error:', message);
     return [];
   }
 }
 
-export async function chatWithAI(messages: any[]) {
+export async function chatWithAI(workspaceId: string, messages: { role: string; content: string }[]) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     if (!process.env.GEMINI_API_KEY) {
-      return { role: 'assistant', content: 'Gemini API key missing. Please check your .env configuration.' };
+      return {
+        role: 'assistant',
+        content: 'Gemini API key missing. Please check your .env configuration.',
+      };
     }
 
-    const context = await getCompanyContext();
-    
-    // Gemini history MUST start with 'user'. Filter out any initial 'model' turns from UI greetings.
-    let history = messages.slice(0, -1).map(m => ({
+    const context = await getCompanyContext(workspaceId);
+
+    let history = messages.slice(0, -1).map((m) => ({
       role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.content }],
     }));
 
-    // Find the first index that is 'user'
-    const firstUserIndex = history.findIndex(h => h.role === 'user');
+    const firstUserIndex = history.findIndex((h) => h.role === 'user');
     if (firstUserIndex !== -1) {
       history = history.slice(firstUserIndex);
     } else {
-      history = []; // No user message yet, start fresh
+      history = [];
     }
 
     const userMessage = messages[messages.length - 1].content;
 
-    // Use a fresh model for chat to include system instruction reliably
-    const chatModel = genAI.getGenerativeModel({ 
+    const chatModel = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash-lite',
       systemInstruction: `You are the Arbitury Pro Assistant. Context: ${JSON.stringify(context)}. Provide brief, actionable, technical advice. If asked about revenue, summarize based on provided orders.`,
     });
@@ -118,24 +133,28 @@ export async function chatWithAI(messages: any[]) {
       role: 'assistant',
       content: result.response.text() || "I couldn't process that request.",
     };
-  } catch (error: any) {
-    console.error('chatWithAI overall error:', error.message || error);
-    return { role: 'assistant', content: `Analyzing error: ${error.message || 'Unknown error'}. Check your GEMINI_API_KEY.` };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('chatWithAI overall error:', message);
+    return {
+      role: 'assistant',
+      content: `Analyzing error: ${message}. Check your GEMINI_API_KEY.`,
+    };
   }
 }
 
-export async function forecastDepletion(productId: string) {
+export async function forecastDepletion(workspaceId: string, productId: string) {
   try {
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
+    await requireWorkspaceAccess(workspaceId);
+    const product = await prisma.product.findFirst({
+      where: { id: productId, workspaceId },
     });
 
     if (!product) return 'Product not available in the database.';
 
-    // Base calculation
-    const avgDailySales = 2.4; 
+    const avgDailySales = 2.4;
     const daysLeft = Math.round(product.quantity / avgDailySales);
-    
+
     let advice = '';
     if (daysLeft < 7) advice = '⚠️ Critical: Restock immediately.';
     else if (daysLeft < 14) advice = '⚡ Warning: Reorder soon.';

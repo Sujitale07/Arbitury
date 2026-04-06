@@ -3,6 +3,7 @@ import { analyzeSeo } from '@/lib/actions/seo';
 import { z } from 'zod';
 
 const analyzeSchema = z.object({
+  workspaceId: z.string().min(1, 'workspaceId is required'),
   projectName: z.string().optional(),
   businessType: z.string().min(1, 'Business type is required'),
   location: z.string().optional(),
@@ -15,7 +16,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const validated = analyzeSchema.parse(body);
     
-    const result = await analyzeSeo({
+    const result = await analyzeSeo(validated.workspaceId, {
       projectName: validated.projectName || '',
       businessType: validated.businessType,
       location: validated.location,

@@ -105,6 +105,9 @@ export interface DashboardMetrics {
   ordersGrowth: number;
 }
 
+/** Store / filter variant key (e.g. product variants in the shop UI). */
+export type ChiaVariant = string;
+
 // ============ CART TYPES ============
 export interface CartItem {
   productId: string;

@@ -10,9 +10,33 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   console.log('Seeding database...');
 
+  // 0. Ensure a User and Workspace exist
+  const user = await prisma.user.upsert({
+    where: { clerkId: 'seed_clerk_user_id' },
+    update: {},
+    create: {
+      clerkId: 'seed_clerk_user_id',
+      email: 'seed@example.com',
+      name: 'Seed User',
+    },
+  });
+
+  const workspace = await prisma.workspace.upsert({
+    where: { id: 'seed_workspace_id' },
+    update: {},
+    create: {
+      id: 'seed_workspace_id',
+      name: 'Default Workspace',
+      ownerId: user.id,
+    },
+  });
+
+  const workspaceId = workspace.id;
+
   // 1. Create Products
   const products = [
     {
+      workspaceId,
       name: 'Organic White Chia Seeds',
       sku: 'CHIA-WHT-ORG',
       category: 'seed' as any,
@@ -27,6 +51,7 @@ async function main() {
       lowStockThreshold: 20,
     },
     {
+      workspaceId,
       name: 'Roasted Black Chia Seeds',
       sku: 'CHIA-BLK-RST',
       category: 'seed' as any,
@@ -41,6 +66,7 @@ async function main() {
       lowStockThreshold: 15,
     },
     {
+      workspaceId,
       name: 'Superfood Mixed Blend',
       sku: 'CHIA-BND-SF',
       category: 'bundle' as any,
@@ -58,17 +84,28 @@ async function main() {
 
   for (const p of products) {
     await prisma.product.upsert({
-      where: { sku: p.sku },
+      where: { 
+        workspaceId_sku: { 
+          workspaceId: p.workspaceId, 
+          sku: p.sku 
+        } 
+      },
       update: {},
       create: p,
     });
   }
 
   // 2. Create Customers
-  const customer = await prisma.customer.upsert({
-    where: { email: 'lifestyle@example.com' },
+  await prisma.customer.upsert({
+    where: { 
+      workspaceId_email: { 
+        workspaceId, 
+        email: 'lifestyle@example.com' 
+      } 
+    },
     update: {},
     create: {
+      workspaceId,
       name: 'Elena Boutique',
       email: 'lifestyle@example.com',
       phone: '+1 555 0123',
@@ -80,18 +117,21 @@ async function main() {
   await prisma.aIInsight.createMany({
     data: [
       {
+        workspaceId,
         type: 'restock' as any,
         title: 'Priority Restock: Organic White',
         description: 'Inventory levels (150) are sufficient but velocity is up 40% due to TikTok trends.',
         urgency: 'medium' as any,
       },
       {
+        workspaceId,
         type: 'pricing' as any,
         title: 'Upsell Opportunity detected',
         description: 'Bundling Black Chia with recipe books has 3x conversion potential.',
         urgency: 'low' as any,
       },
     ],
+    skipDuplicates: true,
   });
 
   console.log('Seeding completed!');
@@ -105,3 +145,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

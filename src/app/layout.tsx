@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { ClerkProvider } from '@clerk/nextjs';
 import { Providers } from './providers';
-import { Sidebar } from '@/components/layout/Sidebar';
+import { AppShell } from '@/components/layout/AppShell';
 
 export const metadata: Metadata = {
   title: 'Arbitury Pro — Seeds & Wellness Dashboard',
@@ -12,12 +13,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <Providers>
-          <div className="app-shell">
-            <Sidebar />
-            <main className="main-content">{children}</main>
-          </div>
-        </Providers>
+        <ClerkProvider>
+          <Providers>
+            <AppShell>{children}</AppShell>
+          </Providers>
+        </ClerkProvider>
       </body>
     </html>
   );

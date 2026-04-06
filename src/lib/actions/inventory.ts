@@ -2,10 +2,13 @@
 
 import { prisma } from '@/lib/prisma';
 import { revalidateTag } from 'next/cache';
+import { requireWorkspaceAccess } from '@/lib/server/require-workspace';
 
-export async function getInventoryLogs() {
+export async function getInventoryLogs(workspaceId: string) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     return await prisma.inventoryLog.findMany({
+      where: { product: { workspaceId } },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
@@ -15,20 +18,24 @@ export async function getInventoryLogs() {
   }
 }
 
-export async function adjustInventory(data: {
-  productId: string;
-  quantityChange: number;
-  action: 'restock' | 'adjustment' | 'expired';
-  notes?: string;
-  createdBy?: string;
-}) {
+export async function adjustInventory(
+  workspaceId: string,
+  data: {
+    productId: string;
+    quantityChange: number;
+    action: 'restock' | 'adjustment' | 'expired';
+    notes?: string;
+    createdBy?: string;
+  }
+) {
   try {
-    const result = await prisma.$transaction(async (tx: any) => {
+    await requireWorkspaceAccess(workspaceId);
+    const result = await prisma.$transaction(async (tx) => {
       const product = await tx.product.update({
-        where: { id: data.productId },
+        where: { id: data.productId, workspaceId },
         data: {
-          quantity: { increment: data.quantityChange }
-        }
+          quantity: { increment: data.quantityChange },
+        },
       });
 
       const log = await tx.inventoryLog.create({
@@ -40,7 +47,7 @@ export async function adjustInventory(data: {
           previousQty: product.quantity - data.quantityChange,
           newQty: product.quantity,
           createdBy: data.createdBy || 'User',
-        }
+        },
       });
 
       return { product, log };

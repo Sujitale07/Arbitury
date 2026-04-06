@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/prisma';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { revalidatePath } from 'next/cache';
+import { requireWorkspaceAccess } from '@/lib/server/require-workspace';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
@@ -62,25 +63,35 @@ export interface SeoAnalysisResult {
 // BUSINESS CONTEXT — auto-pulled from existing DB
 // ============================================================
 
-async function getBusinessContext() {
+async function getBusinessContext(workspaceId: string) {
   const [businessInfo, products, orders, customers] = await Promise.all([
-    prisma.businessInfo.findUnique({ where: { id: 'singleton' } }),
+    prisma.businessInfo.findUnique({ where: { workspaceId } }),
     prisma.product.findMany({
+      where: { workspaceId },
       take: 20,
       select: { name: true, category: true, salePrice: true, quantity: true, supplier: true },
     }),
     prisma.order.findMany({
+      where: { workspaceId },
       take: 20,
       orderBy: { createdAt: 'desc' },
       select: { total: true, channel: true, customerName: true, createdAt: true },
     }),
     prisma.customer.findMany({
+      where: { workspaceId },
       take: 20,
       select: { segment: true, totalSpent: true, totalOrders: true },
     }),
   ]);
 
   return { businessInfo, products, orders, customers };
+}
+
+async function assertSeoProject(workspaceId: string, projectId: string) {
+  await requireWorkspaceAccess(workspaceId);
+  const p = await prisma.seoProject.findFirst({ where: { id: projectId, workspaceId } });
+  if (!p) throw new Error('Project not found');
+  return p;
 }
 
 // ============================================================
@@ -177,16 +188,19 @@ function getMockAnalysis(ctx: {
 // PROJECTS
 // ============================================================
 
-export async function getSeoProjects() {
+export async function getSeoProjects(workspaceId: string) {
+  await requireWorkspaceAccess(workspaceId);
   return prisma.seoProject.findMany({
+    where: { workspaceId },
     orderBy: { updatedAt: 'desc' },
     include: { _count: { select: { keywords: true } } },
   });
 }
 
-export async function deleteSeoProject(id: string) {
-  await prisma.seoProject.delete({ where: { id } });
-  revalidatePath('/marketing/seo');
+export async function deleteSeoProject(workspaceId: string, id: string) {
+  await requireWorkspaceAccess(workspaceId);
+  await prisma.seoProject.deleteMany({ where: { id, workspaceId } });
+  revalidatePath('/workspaces');
   return { success: true };
 }
 
@@ -194,9 +208,10 @@ export async function deleteSeoProject(id: string) {
 // MAIN: Analyze SEO
 // ============================================================
 
-export async function analyzeSeo(input: SeoProjectInput) {
+export async function analyzeSeo(workspaceId: string, input: SeoProjectInput) {
   try {
-    const ctx = await getBusinessContext();
+    await requireWorkspaceAccess(workspaceId);
+    const ctx = await getBusinessContext(workspaceId);
     const { businessInfo, products, orders, customers } = ctx;
 
     const businessName = input.projectName || businessInfo?.name || 'Our Business';
@@ -255,6 +270,7 @@ Generate: exactly 10 keywords, at least 2 competitors, 8 content ideas, 8 action
 
     const project = await prisma.seoProject.create({
       data: {
+        workspaceId,
       name: businessName,
         businessType: industry,
         location: input.location || null,
@@ -305,7 +321,7 @@ Generate: exactly 10 keywords, at least 2 competitors, 8 content ideas, 8 action
       )
     );
 
-    revalidatePath('/marketing/seo');
+    revalidatePath('/workspaces');
     return { success: true, data: { projectId: project.id, keywords: project.keywords } };
   } catch (error: any) {
     console.error('analyzeSeo error:', error);
@@ -313,15 +329,16 @@ Generate: exactly 10 keywords, at least 2 competitors, 8 content ideas, 8 action
   }
 }
 
-export async function reAnalyzeProject(projectId: string) {
+export async function reAnalyzeProject(workspaceId: string, projectId: string) {
   try {
-    const project = await prisma.seoProject.findUnique({
-      where: { id: projectId },
+    const project = await prisma.seoProject.findFirst({
+      where: { id: projectId, workspaceId },
       include: { keywords: true, competitors: true, actions: true }
     });
     if (!project) throw new Error('Project not found');
 
-    const ctx = await getBusinessContext();
+    await requireWorkspaceAccess(workspaceId);
+    const ctx = await getBusinessContext(workspaceId);
     const { products } = ctx;
     const topProducts = products.slice(0, 6).map(p => p.name);
 
@@ -398,7 +415,7 @@ export async function reAnalyzeProject(projectId: string) {
       )
     );
 
-    revalidatePath('/marketing/seo');
+    revalidatePath('/workspaces');
     return { success: true };
   } catch (error: any) {
     console.error('reAnalyzeProject error:', error);
@@ -410,7 +427,8 @@ export async function reAnalyzeProject(projectId: string) {
 // DATA FETCHERS
 // ============================================================
 
-export async function getSeoKeywords(projectId: string) {
+export async function getSeoKeywords(workspaceId: string, projectId: string) {
+  await assertSeoProject(workspaceId, projectId);
   return prisma.seoKeyword.findMany({
     where: { projectId },
     include: { rankings: { orderBy: { recordedAt: 'desc' }, take: 30 } },
@@ -418,21 +436,23 @@ export async function getSeoKeywords(projectId: string) {
   });
 }
 
-export async function getSeoCompetitors(projectId: string) {
+export async function getSeoCompetitors(workspaceId: string, projectId: string) {
+  await assertSeoProject(workspaceId, projectId);
   return prisma.seoCompetitor.findMany({
     where: { projectId },
     orderBy: { estimatedTraffic: 'desc' },
   });
 }
 
-export async function getSeoContentIdeas(projectId: string) {
-  const project = await prisma.seoProject.findUnique({
-    where: { id: projectId },
+export async function getSeoContentIdeas(workspaceId: string, projectId: string) {
+  await assertSeoProject(workspaceId, projectId);
+  const project = await prisma.seoProject.findFirst({
+    where: { id: projectId, workspaceId },
     include: { keywords: { take: 6, orderBy: { opportunityScore: 'desc' } } },
   });
   if (!project) return [];
 
-  const ctx = await getBusinessContext();
+  const ctx = await getBusinessContext(workspaceId);
   const topProducts = ctx.products.slice(0, 4).map(p => p.name);
   const industry = ctx.businessInfo?.industry || project.businessType;
 
@@ -448,7 +468,8 @@ Return JSON array only.`;
   }
 }
 
-export async function getSeoRankings(projectId: string) {
+export async function getSeoRankings(workspaceId: string, projectId: string) {
+  await assertSeoProject(workspaceId, projectId);
   return prisma.seoKeyword.findMany({
     where: { projectId },
     include: { rankings: { orderBy: { recordedAt: 'asc' }, take: 30 } },
@@ -457,16 +478,25 @@ export async function getSeoRankings(projectId: string) {
   });
 }
 
-export async function getSeoActions(projectId: string) {
+export async function getSeoActions(workspaceId: string, projectId: string) {
+  await assertSeoProject(workspaceId, projectId);
   return prisma.seoAction.findMany({
     where: { projectId },
     orderBy: { trafficGain: 'desc' },
   });
 }
 
-export async function toggleSeoAction(id: string, completed: boolean) {
+export async function toggleSeoAction(workspaceId: string, id: string, completed: boolean) {
+  await requireWorkspaceAccess(workspaceId);
+  const action = await prisma.seoAction.findFirst({
+    where: { id },
+    include: { project: { select: { workspaceId: true } } },
+  });
+  if (!action || action.project.workspaceId !== workspaceId) {
+    throw new Error('Action not found');
+  }
   await prisma.seoAction.update({ where: { id }, data: { completed } });
-  revalidatePath('/marketing/seo/actions');
+  revalidatePath('/workspaces');
 }
 
 export async function runCronUpdate() {
@@ -495,6 +525,7 @@ export async function runCronUpdate() {
   return { updated: rankings.length, alerts };
 }
 
-export async function getSeoBusinessInfo() {
-  return prisma.businessInfo.findUnique({ where: { id: 'singleton' } });
+export async function getSeoBusinessInfo(workspaceId: string) {
+  await requireWorkspaceAccess(workspaceId);
+  return prisma.businessInfo.findUnique({ where: { workspaceId } });
 }

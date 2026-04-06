@@ -8,8 +8,9 @@ datasource db {
 
 model Product {
   id                String          @id @default(uuid())
+  workspaceId       String
   name              String
-  sku               String          @unique
+  sku               String
   category          String          // e.g., "Seed", "Clothing", "Sticker"
   variant           String?         // e.g., "White", "Large", "Glossy"
   quantity          Int
@@ -23,14 +24,19 @@ model Product {
   lowStockThreshold Int             @default(10)
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
+  workspace         Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   inventoryLogs     InventoryLog[]
   orderItems        OrderItem[]
+
+  @@unique([workspaceId, sku])
+  @@index([workspaceId])
 }
 
 model Customer {
   id            String          @id @default(uuid())
+  workspaceId   String
   name          String
-  email         String          @unique
+  email         String
   phone         String?
   segment       CustomerSegment @default(new)
   totalOrders   Int             @default(0)
@@ -38,12 +44,17 @@ model Customer {
   lastOrderDate DateTime?
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   orders        Order[]
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId])
 }
 
 model Order {
   id              String      @id @default(uuid())
-  orderNumber     String      @unique
+  workspaceId     String
+  orderNumber     String
   customerId      String
   customerName    String
   customerEmail   String
@@ -56,8 +67,12 @@ model Order {
   notes           String?
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
+  workspace       Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   customer        Customer    @relation(fields: [customerId], references: [id])
   items           OrderItem[]
+
+  @@unique([workspaceId, orderNumber])
+  @@index([workspaceId])
 }
 
 model OrderItem {
@@ -87,6 +102,7 @@ model InventoryLog {
 
 model Campaign {
   id            String         @id @default(uuid())
+  workspaceId   String
   name          String
   subject       String
   content       String
@@ -98,16 +114,23 @@ model Campaign {
   clickRate     Float?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 model AIInsight {
   id          String       @id @default(uuid())
+  workspaceId String
   type        InsightType
   title       String
   description String
   action      String?
   urgency     UrgencyLevel @default(low)
   createdAt   DateTime     @default(now())
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 enum OrderStatus {
@@ -146,13 +169,15 @@ enum CampaignStatus {
 }
 
 model BusinessInfo {
-  id          String   @id @default("singleton")
+  id          String    @id @default(uuid())
+  workspaceId String    @unique
   name        String
-  industry    String   // e.g., "Clothing", "Sticker Store", "Seeds"
+  industry    String    // e.g., "Clothing", "Sticker Store", "Seeds"
   description String?
   website     String?
-  currency    String   @default("USD")
-  updatedAt   DateTime @updatedAt
+  currency    String    @default("USD")
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 enum InsightType {
@@ -175,6 +200,7 @@ enum UrgencyLevel {
 
 model SeoProject {
   id           String          @id @default(uuid())
+  workspaceId  String
   name         String
   businessType String
   location     String?
@@ -182,9 +208,12 @@ model SeoProject {
   seedKeywords String[]        @default([])
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   keywords     SeoKeyword[]
   competitors  SeoCompetitor[]
   actions      SeoAction[]
+
+  @@index([workspaceId])
 }
 
 model SeoKeyword {
@@ -248,4 +277,80 @@ enum SeoPriority {
   high
   medium
   low
+}
+
+// ============================================================
+// WORKSPACES (Clerk-synced app users, multi-tenant collaboration)
+// ============================================================
+
+model User {
+  id           String                  @id @default(uuid())
+  clerkId      String                  @unique
+  email        String                  @unique
+  name         String
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  ownedWorkspaces Workspace[]          @relation("WorkspaceOwner")
+  memberships     WorkspaceMembership[]
+  invitationsSent WorkspaceInvitation[] @relation("InvitationInviter")
+}
+
+model Workspace {
+  id           String                  @id @default(uuid())
+  name         String
+  ownerId      String
+  createdAt    DateTime                @default(now())
+  owner        User                    @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  memberships  WorkspaceMembership[]
+  invitations  WorkspaceInvitation[]
+  products     Product[]
+  customers    Customer[]
+  orders       Order[]
+  campaigns    Campaign[]
+  aiInsights   AIInsight[]
+  businessInfo BusinessInfo?
+  seoProjects  SeoProject[]
+}
+
+model WorkspaceMembership {
+  id          String        @id @default(uuid())
+  userId      String
+  workspaceId String
+  role        WorkspaceRole
+  createdAt   DateTime      @default(now())
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+model WorkspaceInvitation {
+  id              String           @id @default(uuid())
+  email           String
+  workspaceId     String
+  role            WorkspaceRole
+  tokenHash       String           @unique
+  expiresAt       DateTime
+  status          InvitationStatus @default(PENDING)
+  invitedByUserId String?
+  createdAt       DateTime         @default(now())
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy       User?            @relation("InvitationInviter", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([email, workspaceId])
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  CANCELLED
 }

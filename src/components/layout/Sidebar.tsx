@@ -19,58 +19,88 @@ import {
   Zap,
   ChevronDown,
   Mail,
+  Briefcase,
+  UsersRound,
 } from 'lucide-react';
+import { UserButton, SignInButton, useAuth } from '@clerk/nextjs';
 import { cn } from '@/lib/utils';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
-const SEO_NAV = [
-  { href: '/marketing/seo/keywords', icon: Search, label: 'Keyword Research' },
-  { href: '/marketing/seo/competitors', icon: Globe, label: 'Competitor Analysis' },
-  { href: '/marketing/seo/content', icon: Lightbulb, label: 'Content Ideas' },
-  { href: '/marketing/seo/rankings', icon: TrendingUp, label: 'Rank Tracking' },
-  { href: '/marketing/seo/actions', icon: Zap, label: 'SEO Actions' },
-];
-
-const NAV = [
-  {
-    label: 'Main',
-    items: [
-      { href: '/', icon: LayoutDashboard, label: 'Dashboard' },
-      { href: '/inventory', icon: Package, label: 'Inventory' },
-      { href: '/orders', icon: ShoppingCart, label: 'Orders' },
-    ],
-  },
-  {
-    label: 'Growth',
-    items: [
-      { href: '/customers', icon: Users, label: 'Customers' },
-      { 
-        label: 'Marketing', 
-        icon: Megaphone, 
-        isGroup: true,
-        children: [
-          { label: 'Email Campaigns', href: '/marketing', icon: Mail },
-          { label: 'SEO Marketing', isSeoGroup: true, icon: Search },
-        ]
-      },
-      { href: '/ai', icon: Sparkles, label: 'AI Insights' },
-    ],
-  },
-  {
-    label: 'More',
-    items: [
-      { href: '/store', icon: Store, label: 'Store' },
-      { href: '/reports', icon: BarChart2, label: 'Reports' },
-      { href: '/settings', icon: Settings, label: 'Settings' },
-    ],
-  },
-];
+function workspaceBase(pathname: string): string | null {
+  const m = pathname.match(/^\/workspaces\/([^/]+)/);
+  return m ? `/workspaces/${m[1]}` : null;
+}
 
 export function Sidebar() {
+  const { isSignedIn, isLoaded } = useAuth();
   const pathname = usePathname();
-  const isMarketingActive = pathname.startsWith('/marketing');
-  const isSeoActive = pathname.startsWith('/marketing/seo');
-  
+  const base = workspaceBase(pathname);
+  const seoPrefix = base ? `${base}/marketing/seo` : '';
+
+  const SEO_NAV = useMemo(
+    () =>
+      base
+        ? [
+            { href: `${seoPrefix}/keywords`, icon: Search, label: 'Keyword Research' },
+            { href: `${seoPrefix}/competitors`, icon: Globe, label: 'Competitor Analysis' },
+            { href: `${seoPrefix}/content`, icon: Lightbulb, label: 'Content Ideas' },
+            { href: `${seoPrefix}/rankings`, icon: TrendingUp, label: 'Rank Tracking' },
+            { href: `${seoPrefix}/actions`, icon: Zap, label: 'SEO Actions' },
+          ]
+        : [],
+    [base, seoPrefix],
+  );
+
+  const NAV = useMemo(() => {
+    if (!base) {
+      return [
+        {
+          label: 'Main',
+          items: [{ href: '/workspaces', icon: Briefcase, label: 'Workspaces' }],
+        },
+      ];
+    }
+    return [
+      {
+        label: 'Main',
+        items: [
+          { href: base, icon: LayoutDashboard, label: 'Dashboard' },
+          { href: `${base}/inventory`, icon: Package, label: 'Inventory' },
+          { href: `${base}/orders`, icon: ShoppingCart, label: 'Orders' },
+        ],
+      },
+      {
+        label: 'Growth',
+        items: [
+          { href: `${base}/customers`, icon: Users, label: 'Customers' },
+          {
+            label: 'Marketing',
+            icon: Megaphone,
+            isGroup: true,
+            children: [
+              { label: 'Email Campaigns', href: `${base}/marketing`, icon: Mail },
+              { label: 'SEO Marketing', isSeoGroup: true, icon: Search },
+            ],
+          },
+          { href: `${base}/ai`, icon: Sparkles, label: 'AI Insights' },
+        ],
+      },
+      {
+        label: 'More',
+        items: [
+          { href: `${base}/store`, icon: Store, label: 'Store' },
+          { href: `${base}/reports`, icon: BarChart2, label: 'Reports' },
+          { href: `${base}/settings`, icon: Settings, label: 'Settings' },
+          { href: `${base}/teams`, icon: UsersRound, label: 'Teams' },
+          { href: '/workspaces', icon: Briefcase, label: 'Workspaces' },
+        ],
+      },
+    ];
+  }, [base]);
+
+  const isMarketingActive = !!(base && pathname.startsWith(`${base}/marketing`));
+  const isSeoActive = !!(base && pathname.startsWith(`${base}/marketing/seo`));
+
   const [marketingExpanded, setMarketingExpanded] = useState(isMarketingActive);
   const [seoExpanded, setSeoExpanded] = useState(isSeoActive);
 
@@ -89,15 +119,15 @@ export function Sidebar() {
               {section.items.map((item: any) => {
                 if (item.isGroup) {
                   const Icon = item.icon;
-                  const isAnyChildActive = item.children.some((c: any) => 
-                    c.href ? pathname === c.href : pathname.startsWith('/marketing/seo')
+                  const isAnyChildActive = item.children.some((c: any) =>
+                    c.href ? pathname === c.href || pathname.startsWith(`${c.href}/`) : isSeoActive,
                   );
 
                   return (
                     <div key={item.label} className="mb-1">
-                      <button 
+                      <button
                         onClick={() => setMarketingExpanded(!marketingExpanded)}
-                        className={cn('nav-link w-full', isAnyChildActive && 'active')} 
+                        className={cn('nav-link w-full', isAnyChildActive && 'active')}
                         style={{ justifyContent: 'space-between', textAlign: 'left', width: '100%' }}
                       >
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -113,24 +143,26 @@ export function Sidebar() {
                           }}
                         />
                       </button>
-                      
+
                       {marketingExpanded && (
-                        <div style={{ 
-                          marginLeft: 12, 
-                          borderLeft: '1px solid var(--border)', 
-                          paddingLeft: 4, 
-                          display: 'flex', 
-                          flexDirection: 'column', 
-                          gap: 4, 
-                          marginTop: 6 
-                        }}>
+                        <div
+                          style={{
+                            marginLeft: 12,
+                            borderLeft: '1px solid var(--border)',
+                            paddingLeft: 4,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4,
+                            marginTop: 6,
+                          }}
+                        >
                           {item.children.map((child: any) => {
                             if (child.isSeoGroup) {
                               return (
                                 <div key="seo-group">
                                   <button
                                     onClick={() => setSeoExpanded(!seoExpanded)}
-                                    className={cn('nav-link w-full', pathname.startsWith('/marketing/seo') && 'active')}
+                                    className={cn('nav-link w-full', isSeoActive && 'active')}
                                     style={{ justifyContent: 'space-between', textAlign: 'left', width: '100%', fontSize: 13 }}
                                   >
                                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -148,13 +180,15 @@ export function Sidebar() {
                                   </button>
 
                                   {seoExpanded && (
-                                    <div style={{ 
-                                      paddingLeft: 12, 
-                                      display: 'flex', 
-                                      flexDirection: 'column', 
-                                      gap: 2, 
-                                      marginTop: 6 
-                                    }}>
+                                    <div
+                                      style={{
+                                        paddingLeft: 12,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 2,
+                                        marginTop: 6,
+                                      }}
+                                    >
                                       {SEO_NAV.map((sub) => (
                                         <Link
                                           key={sub.href}
@@ -176,7 +210,10 @@ export function Sidebar() {
                               <Link
                                 key={child.href}
                                 href={child.href}
-                                className={cn('nav-link', pathname === child.href && 'active')}
+                                className={cn(
+                                  'nav-link',
+                                  (pathname === child.href || pathname.startsWith(`${child.href}/`)) && 'active',
+                                )}
                                 style={{ fontSize: 13 }}
                               >
                                 <child.icon size={14} />
@@ -190,16 +227,13 @@ export function Sidebar() {
                   );
                 }
 
-                const active = item.href === '/' 
-                  ? pathname === '/' 
-                  : pathname.startsWith(item.href);
+                const active =
+                  item.href === '/workspaces'
+                    ? pathname === '/workspaces'
+                    : pathname === item.href || pathname.startsWith(`${item.href}/`);
 
                 return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn('nav-link', active && 'active')}
-                  >
+                  <Link key={item.href} href={item.href} className={cn('nav-link', active && 'active')}>
                     <item.icon size={15} />
                     {item.label}
                   </Link>
@@ -210,12 +244,18 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="sidebar-footer">
-        <div className="sidebar-avatar">AR</div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)' }}>Arbitury Admin</div>
-          <div style={{ fontSize: 11, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>admin@arbitury.com</div>
-        </div>
+      <div className="sidebar-footer" style={{ alignItems: 'center', gap: 12 }}>
+        {!isLoaded ? (
+          <div style={{ width: 36, height: 36 }} aria-hidden />
+        ) : isSignedIn ? (
+          <UserButton />
+        ) : (
+          <SignInButton mode="modal">
+            <button type="button" className="btn btn-secondary btn-sm">
+              Sign in
+            </button>
+          </SignInButton>
+        )}
       </div>
     </aside>
   );

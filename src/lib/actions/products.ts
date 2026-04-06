@@ -2,10 +2,13 @@
 
 import { prisma } from '@/lib/prisma';
 import { revalidateTag } from 'next/cache';
+import { requireWorkspaceAccess } from '@/lib/server/require-workspace';
 
-export async function getProducts() {
+export async function getProducts(workspaceId: string) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     return await prisma.product.findMany({
+      where: { workspaceId },
       orderBy: { createdAt: 'desc' },
     });
   } catch (error) {
@@ -14,14 +17,16 @@ export async function getProducts() {
   }
 }
 
-export async function createProduct(data: any) {
+export async function createProduct(workspaceId: string, data: any) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     const product = await prisma.product.create({
       data: {
+        workspaceId,
         ...data,
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
         harvestDate: data.harvestDate ? new Date(data.harvestDate) : null,
-      }
+      },
     });
     revalidateTag('products', '');
     return { success: true, data: product };
@@ -31,15 +36,16 @@ export async function createProduct(data: any) {
   }
 }
 
-export async function updateProduct(id: string, data: any) {
+export async function updateProduct(workspaceId: string, id: string, data: any) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     const product = await prisma.product.update({
-      where: { id },
+      where: { id, workspaceId },
       data: {
         ...data,
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
         harvestDate: data.harvestDate ? new Date(data.harvestDate) : null,
-      }
+      },
     });
     revalidateTag('products', '');
     return { success: true, data: product };
@@ -49,9 +55,10 @@ export async function updateProduct(id: string, data: any) {
   }
 }
 
-export async function deleteProduct(id: string) {
+export async function deleteProduct(workspaceId: string, id: string) {
   try {
-    await prisma.product.delete({ where: { id } });
+    await requireWorkspaceAccess(workspaceId);
+    await prisma.product.delete({ where: { id, workspaceId } });
     revalidateTag('products', '');
     return { success: true };
   } catch (error) {

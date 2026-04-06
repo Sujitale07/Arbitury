@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/prisma';
 import { revalidateTag } from 'next/cache';
 import type { OrderStatus, SaleChannel } from '@prisma/client';
+import { requireWorkspaceAccess } from '@/lib/server/require-workspace';
 
 interface OrderItemInput {
   productId: string;
@@ -27,9 +28,11 @@ interface OrderInput {
   items: OrderItemInput[];
 }
 
-export async function getOrders() {
+export async function getOrders(workspaceId: string) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     return await prisma.order.findMany({
+      where: { workspaceId },
       include: { items: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -39,12 +42,13 @@ export async function getOrders() {
   }
 }
 
-export async function createOrder(data: OrderInput) {
+export async function createOrder(workspaceId: string, data: OrderInput) {
   try {
-    const result = await prisma.$transaction(async (tx: any) => {
-      // 1. Create the order
+    await requireWorkspaceAccess(workspaceId);
+    const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.create({
         data: {
+          workspaceId,
           orderNumber: data.orderNumber,
           customerId: data.customerId,
           customerName: data.customerName,
@@ -57,7 +61,7 @@ export async function createOrder(data: OrderInput) {
           shippingAddress: data.shippingAddress,
           notes: data.notes,
           items: {
-            create: data.items.map((item: any) => ({
+            create: data.items.map((item) => ({
               productId: item.productId,
               productName: item.productName,
               quantity: item.quantity,
@@ -68,7 +72,6 @@ export async function createOrder(data: OrderInput) {
         },
       });
 
-      // 2. Update Customer lifetime stats
       await tx.customer.update({
         where: { id: data.customerId },
         data: {
@@ -78,16 +81,14 @@ export async function createOrder(data: OrderInput) {
         },
       });
 
-      // 3. Update Inventory for each item
       for (const item of data.items) {
         const product = await tx.product.update({
-          where: { id: item.productId },
+          where: { id: item.productId, workspaceId },
           data: {
             quantity: { decrement: item.quantity },
           },
         });
 
-        // Log the inventory change
         await tx.inventoryLog.create({
           data: {
             productId: item.productId,
@@ -114,20 +115,21 @@ export async function createOrder(data: OrderInput) {
   }
 }
 
-export async function checkoutManualOrder(checkoutData: any, cartItems: any[]) {
+export async function checkoutManualOrder(workspaceId: string, checkoutData: any, cartItems: any[]) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     const { firstName, lastName, email, address, city, state, zip, notes } = checkoutData;
     const customerName = `${firstName} ${lastName}`;
     const fullAddress = `${address}, ${city}, ${state} ${zip}`;
 
-    // 1. Find or create customer
     let customer = await prisma.customer.findUnique({
-      where: { email },
+      where: { workspaceId_email: { workspaceId, email } },
     });
 
     if (!customer) {
       customer = await prisma.customer.create({
         data: {
+          workspaceId,
           name: customerName,
           email,
           phone: checkoutData.phone || '',
@@ -135,9 +137,8 @@ export async function checkoutManualOrder(checkoutData: any, cartItems: any[]) {
       });
     }
 
-    // 2. Prepare Order Data
-    const subtotal = cartItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
-    const tax = subtotal * 0.08; // 8% tax
+    const subtotal = cartItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const tax = subtotal * 0.08;
     const total = subtotal + tax;
     const orderNumber = `AR-${Date.now().toString().slice(-6)}`;
 
@@ -153,52 +154,54 @@ export async function checkoutManualOrder(checkoutData: any, cartItems: any[]) {
       channel: 'online' as SaleChannel,
       shippingAddress: fullAddress,
       notes,
-      items: cartItems.map(item => ({
+      items: cartItems.map((item) => ({
         ...item,
-        total: item.quantity * item.unitPrice
-      }))
+        total: item.quantity * item.unitPrice,
+      })),
     };
 
-    return await createOrder(orderData);
+    return await createOrder(workspaceId, orderData);
   } catch (error) {
     console.error('checkoutManualOrder error:', error);
     return { success: false, error: 'Checkout failed' };
   }
 }
 
-export async function recordManualSale(data: any) {
+export async function recordManualSale(workspaceId: string, data: any) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     const { customerName, email, items, channel } = data;
     const finalEmail = email || `walkin-${Date.now()}@arbitury.com`;
 
-    // 1. Find or create customer
     let customer = await prisma.customer.findUnique({
-      where: { email: finalEmail },
+      where: { workspaceId_email: { workspaceId, email: finalEmail } },
     });
 
     if (!customer) {
       customer = await prisma.customer.create({
         data: {
+          workspaceId,
           name: customerName,
           email: finalEmail,
         },
       });
     }
 
-    // 2. Prepare complete item data (with prices)
-    const orderItems = await Promise.all(items.map(async (item: any) => {
-      const product = await prisma.product.findUnique({
-        where: { id: item.productId },
-        select: { name: true, salePrice: true }
-      });
-      return {
-        productId: item.productId,
-        productName: product?.name || 'Unknown Product',
-        quantity: item.quantity,
-        unitPrice: product?.salePrice || 0,
-        total: (product?.salePrice || 0) * item.quantity,
-      };
-    }));
+    const orderItems = await Promise.all(
+      items.map(async (item: { productId: string; quantity: number }) => {
+        const product = await prisma.product.findFirst({
+          where: { id: item.productId, workspaceId },
+          select: { name: true, salePrice: true },
+        });
+        return {
+          productId: item.productId,
+          productName: product?.name || 'Unknown Product',
+          quantity: item.quantity,
+          unitPrice: product?.salePrice || 0,
+          total: (product?.salePrice || 0) * item.quantity,
+        };
+      })
+    );
 
     const subtotal = orderItems.reduce((s, i) => s + i.total, 0);
     const tax = subtotal * 0.08;
@@ -218,17 +221,18 @@ export async function recordManualSale(data: any) {
       items: orderItems,
     };
 
-    return await createOrder(orderData);
+    return await createOrder(workspaceId, orderData);
   } catch (error) {
     console.error('recordManualSale error:', error);
     return { success: false, error: 'Failed to record sale' };
   }
 }
 
-export async function updateOrderStatus(id: string, status: OrderStatus) {
+export async function updateOrderStatus(workspaceId: string, id: string, status: OrderStatus) {
   try {
+    await requireWorkspaceAccess(workspaceId);
     const order = await prisma.order.update({
-      where: { id },
+      where: { id, workspaceId },
       data: { status },
     });
     revalidateTag('orders', '');
@@ -239,9 +243,12 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
   }
 }
 
-export async function recoverAbandonedCart(customerId: string, items: any[]) {
+export async function recoverAbandonedCart(workspaceId: string, customerId: string, items: any[]) {
   try {
-    const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+    await requireWorkspaceAccess(workspaceId);
+    const customer = await prisma.customer.findFirst({
+      where: { id: customerId, workspaceId },
+    });
     if (!customer) return { success: false };
 
     const { GoogleGenerativeAI } = await import('@google/generative-ai');
@@ -255,7 +262,6 @@ export async function recoverAbandonedCart(customerId: string, items: any[]) {
     const result = await model.generateContent(prompt);
     const body = result.response.text();
 
-    // Send via Resend
     if (process.env.RESEND_API_KEY) {
       const { Resend } = await import('resend');
       const resend = new Resend(process.env.RESEND_API_KEY);
