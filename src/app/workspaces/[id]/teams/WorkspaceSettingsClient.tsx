@@ -447,7 +447,7 @@ export function WorkspaceSettingsClient({
                 {invitations.map((inv) => (
                   <div key={inv.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-2)', padding: '12px 16px', borderRadius: 16, border: '1px solid var(--border)' }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', truncate: true }} title={inv.email}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={inv.email}>
                         {inv.email}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
@@ -493,4 +493,11 @@ type MemberRow = {
   name: string;
   email: string;
   role: WorkspaceRole;
+};
+
+type InviteRow = {
+  id: string;
+  email: string;
+  role: WorkspaceRole;
+  expiresAt: Date;
 };
