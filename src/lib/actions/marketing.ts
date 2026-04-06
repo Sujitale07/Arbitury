@@ -64,7 +64,7 @@ export async function sendAutomatedNewsletters(workspaceId: string, segment: str
 
     if (process.env.RESEND_API_KEY) {
       await resend.emails.send({
-        from: 'Arbitury <delivered@resend.dev>',
+        from: 'Arbitury <delivered@sujitmagar.com.np>',
         to: customers.map((c) => c.email),
         subject: content.subject,
         html: `<div>${content.body.replace(/\n/g, '<br/>')}</div>`,
@@ -144,7 +144,7 @@ export async function sendCampaign(workspaceId: string, campaignId: string) {
 
     if (customers.length > 0 && process.env.RESEND_API_KEY) {
       await resend.emails.send({
-        from: 'Arbitury <delivered@resend.dev>',
+        from: 'Arbitury <delivered@sujitmagar.com.np>',
         to: customers.map((c) => c.email),
         subject: campaign.subject,
         html: `<div>${campaign.content.replace(/\n/g, '<br/>')}</div>`,

@@ -1,7 +1,7 @@
 import { Resend } from 'resend';
 import { normalizeEmail } from '@/lib/invite-token';
 
-const fromDefault = 'Arbitury <onboarding@resend.dev>';
+const fromDefault = 'Arbitury <onboarding@sujitmagar.com.np>';
 
 export async function sendWorkspaceInviteEmail(params: {
   to: string;
